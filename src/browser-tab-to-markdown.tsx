@@ -175,7 +175,7 @@ export default function Command(props: LaunchProps) {
 
           await showToast({
             style: Toast.Style.Animated,
-            title: "Converting webpage",
+            title: "Converting Webpage",
             message: `Converting ${domain} to markdown...`,
           });
         }
@@ -216,10 +216,14 @@ export default function Command(props: LaunchProps) {
 
             // Always show a toast when auto-copying in silent mode
             if (silentMode) {
+              // Calculate size - handle small files better
+              const sizeKB = finalMarkdown.length / 1024;
+              const sizeText = sizeKB < 1 ? `${Math.round(finalMarkdown.length)} bytes` : `${sizeKB.toFixed(1)}KB`;
+
               await showToast({
                 style: Toast.Style.Success,
                 title: "Copied to Clipboard",
-                message: `${Math.round(finalMarkdown.length / 1024)}KB copied - conversion complete`,
+                message: `${sizeText} copied - conversion complete`,
               });
             }
           } catch (clipError) {
@@ -233,11 +237,15 @@ export default function Command(props: LaunchProps) {
             }
           }
         } else if (silentMode) {
+          // Calculate size - handle small files better
+          const sizeKB = finalMarkdown.length / 1024;
+          const sizeText = sizeKB < 1 ? `${Math.round(finalMarkdown.length)} bytes` : `${sizeKB.toFixed(1)}KB`;
+
           // Show completion toast in silent mode when not auto-copying
           await showToast({
             style: Toast.Style.Success,
-            title: "Conversion successful",
-            message: `Ready: ${Math.round(finalMarkdown.length / 1024)}KB (open command to copy)`,
+            title: "Conversion Successful",
+            message: `Ready: ${sizeText} (open command to copy)`,
           });
         }
       } catch (error) {
@@ -267,20 +275,20 @@ export default function Command(props: LaunchProps) {
 
         if (silentMode) {
           // Create a more specific error message based on the error type
-          let errorTitle = "Conversion failed";
+          let errorTitle = "Conversion Failed";
           let errorMsg = errorMessage;
 
           if (errorMessage.includes("Browser extension")) {
-            errorTitle = "Browser extension error";
+            errorTitle = "Browser Extension Error";
             errorMsg = "Could not access browser tabs";
           } else if (errorMessage.includes("no valid URL")) {
-            errorTitle = "No URL found";
+            errorTitle = "No URL Found";
             errorMsg = "No URL in browser tab or clipboard";
           } else if (errorMessage.includes("rate limit")) {
-            errorTitle = "API rate limit";
+            errorTitle = "API Rate Limit";
             errorMsg = "Jina.ai API rate limited - try adding API key in preferences";
           } else if (errorMessage.includes("active browser tab")) {
-            errorTitle = "No active tab";
+            errorTitle = "No Active Tab";
             errorMsg = "No active browser tab found with URL";
           }
 
