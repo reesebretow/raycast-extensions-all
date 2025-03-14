@@ -76,6 +76,7 @@ export default function Command(props: LaunchProps) {
   const [error, setError] = useState<Error | null>(null);
   const [metadata, setMetadata] = useState<Metadata>({});
   const [extensionAccessible, setExtensionAccessible] = useState<boolean>(false);
+  const [copiedToClipboard, setCopiedToClipboard] = useState<boolean>(false);
   const preferences = getPreferenceValues<BrowserTabPreferences>();
   const isBackground = props.launchType === "background";
 
@@ -175,7 +176,7 @@ export default function Command(props: LaunchProps) {
 
           await showToast({
             style: Toast.Style.Animated,
-            title: "Converting Webpage",
+            title: "Converting webpage",
             message: `Converting ${domain} to markdown...`,
           });
         }
@@ -213,28 +214,26 @@ export default function Command(props: LaunchProps) {
           try {
             await Clipboard.copy(finalMarkdown);
             console.log("Content copied to clipboard");
+            setCopiedToClipboard(true);
 
-            // Always show a toast when auto-copying in silent mode
-            if (silentMode) {
-              // Calculate size - handle small files better
-              const sizeKB = finalMarkdown.length / 1024;
-              const sizeText = sizeKB < 1 ? `${Math.round(finalMarkdown.length)} bytes` : `${sizeKB.toFixed(1)}KB`;
+            // Calculate size - handle small files better
+            const sizeKB = finalMarkdown.length / 1024;
+            const sizeText = sizeKB < 1 ? `${Math.round(finalMarkdown.length)} bytes` : `${sizeKB.toFixed(1)}KB`;
 
-              await showToast({
-                style: Toast.Style.Success,
-                title: "Copied to Clipboard",
-                message: `${sizeText} copied - conversion complete`,
-              });
-            }
+            // Show toast for both silent and non-silent mode
+            await showToast({
+              style: Toast.Style.Success,
+              title: "Copied to Clipboard",
+              message: `${sizeText} copied`,
+            });
           } catch (clipError) {
             console.error("Error copying to clipboard:", clipError);
-            if (silentMode) {
-              await showToast({
-                style: Toast.Style.Failure,
-                title: "Auto-copy failed",
-                message: "Could not copy to clipboard",
-              });
-            }
+            setCopiedToClipboard(false);
+            await showToast({
+              style: Toast.Style.Failure,
+              title: "Auto-copy failed",
+              message: "Could not copy to clipboard",
+            });
           }
         } else if (silentMode) {
           // Calculate size - handle small files better
@@ -244,7 +243,7 @@ export default function Command(props: LaunchProps) {
           // Show completion toast in silent mode when not auto-copying
           await showToast({
             style: Toast.Style.Success,
-            title: "Conversion Successful",
+            title: "Conversion successful",
             message: `Ready: ${sizeText} (open command to copy)`,
           });
         }
@@ -275,20 +274,20 @@ export default function Command(props: LaunchProps) {
 
         if (silentMode) {
           // Create a more specific error message based on the error type
-          let errorTitle = "Conversion Failed";
+          let errorTitle = "Conversion failed";
           let errorMsg = errorMessage;
 
           if (errorMessage.includes("Browser extension")) {
-            errorTitle = "Browser Extension Error";
+            errorTitle = "Browser extension error";
             errorMsg = "Could not access browser tabs";
           } else if (errorMessage.includes("no valid URL")) {
-            errorTitle = "No URL Found";
+            errorTitle = "No URL found";
             errorMsg = "No URL in browser tab or clipboard";
           } else if (errorMessage.includes("rate limit")) {
-            errorTitle = "API Rate Limit";
+            errorTitle = "API rate limit";
             errorMsg = "Jina.ai API rate limited - try adding API key in preferences";
           } else if (errorMessage.includes("active browser tab")) {
-            errorTitle = "No Active Tab";
+            errorTitle = "No active tab";
             errorMsg = "No active browser tab found with URL";
           }
 
