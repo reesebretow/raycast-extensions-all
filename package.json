@@ -19,8 +19,8 @@
     {
       "name": "webpage-to-markdown",
       "title": "Webpage to Markdown",
-      "subtitle": "Jina.ai",
-      "description": "Convert any webpage to well-formatted Markdown",
+      "subtitle": "Convert a webpage to markdown format",
+      "description": "Converts webpage to markdown format using Jina AI",
       "mode": "view",
       "arguments": [
         {
@@ -34,37 +34,36 @@
     {
       "name": "browser-tab-to-markdown",
       "title": "Browser Tab to Markdown",
-      "subtitle": "Jina.ai",
-      "description": "Convert active browser tab to Markdown (requires Raycast Browser Extension)",
+      "subtitle": "Convert current browser tab to markdown",
+      "description": "Converts the currently active browser tab to markdown format using Jina AI",
       "mode": "view",
-      "icon": "extension-icon.png",
       "preferences": [
         {
           "name": "useClipboardFallback",
-          "title": "Use Clipboard Fallback",
-          "description": "Fall back to using clipboard content if it contains a valid URL",
           "type": "checkbox",
           "required": false,
           "default": true,
-          "label": "Enable"
+          "title": "Use Clipboard Fallback",
+          "label": "Use Clipboard Fallback",
+          "description": "Fall back to clipboard content when no browser tab is found"
         },
         {
           "name": "autoCopyToClipboard",
-          "title": "Auto-Copy to Clipboard",
-          "description": "Automatically copy the Markdown to clipboard when conversion completes",
           "type": "checkbox",
           "required": false,
           "default": false,
-          "label": "Enable"
+          "title": "Auto-Copy to Clipboard",
+          "label": "Auto-Copy to Clipboard",
+          "description": "Automatically copy markdown to clipboard when conversion is complete"
         },
         {
           "name": "silentMode",
-          "title": "Silent Mode",
-          "description": "Run headless with no UI (requires auto-copy enabled to be useful)",
           "type": "checkbox",
           "required": false,
           "default": false,
-          "label": "Enable"
+          "title": "Silent Mode",
+          "label": "Silent Mode",
+          "description": "Run in silent mode (close window automatically and show only toasts)"
         }
       ]
     }

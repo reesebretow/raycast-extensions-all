@@ -5,381 +5,329 @@ import {
   Icon,
   getPreferenceValues,
   environment,
-  BrowserExtension,
-  Toast,
   showToast,
+  Toast,
   Clipboard,
   closeMainWindow,
-  LaunchType,
   LaunchProps,
+  BrowserExtension,
 } from "@raycast/api";
-import { useState, useEffect } from "react";
-import { Metadata, Preferences } from "./types";
+import { useEffect, useState } from "react";
+import { Arguments, Metadata, Preferences } from "./types";
 import { fetchJinaMarkdown } from "./services/jina-service";
 import { processMarkdownContent } from "./utils/markdown-utils";
 import { MetadataSection } from "./components/MetadataSection";
 import { addFrontMatter } from "./utils/get-prefs";
 
+// URL utility functions
 /**
- * Checks if a string is a valid URL
- * @param {string} string - The string to check
- * @returns {boolean} - Whether the string is a valid URL
+ * Check if the provided string is a valid URL.
+ * @param {string} url - The URL to validate
+ * @returns {boolean} - Whether the URL is valid
  */
-function isValidURL(string: string): boolean {
-  if (!string) return false;
-
+function isValidURL(url: string): boolean {
   try {
-    const url = new URL(string);
-    return url.protocol === "http:" || url.protocol === "https:";
-  } catch (_) {
+    const parsedUrl = new URL(url);
+    return parsedUrl.protocol === "http:" || parsedUrl.protocol === "https:";
+  } catch (error) {
     return false;
   }
 }
 
 /**
- * Extracts a URL from text if present
- * @param {string} text - The text to extract a URL from
- * @returns {string|null} - The extracted URL or null if none found
+ * Extracts a URL from the provided text.
+ * @param {string} text - The text to extract from
+ * @returns {string | null} - The extracted URL or null if none found
  */
-function extractURL(text: string): string | null {
-  if (!text) return null;
-
-  // First check if the entire text is a URL
-  if (isValidURL(text)) {
-    return text;
-  }
-
-  // Try to find URLs in text using regex
+function extractURLFromText(text: string): string | null {
+  // Match URLs that start with http:// or https://
   const urlRegex = /(https?:\/\/[^\s]+)/g;
   const matches = text.match(urlRegex);
 
   if (matches && matches.length > 0) {
-    // Return the first URL found
-    return matches[0];
+    // Get the first URL and clean it up if needed
+    const url = matches[0].trim();
+
+    // Remove any trailing punctuation or parentheses that might be part of the text
+    const cleanUrl = url.replace(/[.,;:!?)]+$/, "");
+
+    if (isValidURL(cleanUrl)) {
+      return cleanUrl;
+    }
   }
 
   return null;
 }
 
+// Extended preferences for the browser tab to markdown command
+interface BrowserTabPreferences extends Preferences {
+  useClipboardFallback: boolean;
+  autoCopyToClipboard: boolean;
+  silentMode: boolean;
+  includeLinksSummary: boolean;
+  prependFrontMatter: boolean;
+  includeMetadata: boolean;
+}
+
 export default function Command(props: LaunchProps) {
-  const [markdown, setMarkdown] = useState<string>("Processing...");
+  const [markdown, setMarkdown] = useState<string>("");
+  const [url, setUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
   const [metadata, setMetadata] = useState<Metadata>({});
-  const [url, setUrl] = useState<string>("");
-  const preferences = getPreferenceValues<Preferences>();
+  const [extensionAccessible, setExtensionAccessible] = useState<boolean>(false);
+  const preferences = getPreferenceValues<BrowserTabPreferences>();
+  const isBackground = props.launchType === "background";
 
-  // Extract the command-specific preferences
-  const useClipboardFallback = preferences.useClipboardFallback !== undefined ? preferences.useClipboardFallback : true;
-  const autoCopyToClipboard = preferences.autoCopyToClipboard || false;
-  const silentMode = preferences.silentMode || false;
+  // Extract all preference values needed in the component
+  const {
+    useClipboardFallback,
+    autoCopyToClipboard,
+    silentMode,
+    includeLinksSummary,
+    prependFrontMatter,
+    includeMetadata,
+  } = preferences;
 
-  // Check if silent mode is enabled and auto-copy is enabled
-  const shouldRunSilently = silentMode && autoCopyToClipboard;
-
-  // Check if this is a background launch (Raycast loses focus)
-  const isBackgroundLaunch = props.launchType === LaunchType.Background;
-
-  // Combined flag for fully silent operation
-  const isFullySilent = shouldRunSilently || isBackgroundLaunch;
+  // Close window immediately if in silent mode
+  useEffect(() => {
+    if (silentMode) {
+      showToast({
+        style: Toast.Style.Animated,
+        title: "Browser Tab to Markdown",
+        message: "Looking for active browser tab...",
+      });
+      closeMainWindow();
+    }
+  }, [silentMode]);
 
   useEffect(() => {
-    async function fetchBrowserTabAndConvert() {
+    // Create a flag to prevent race conditions with multiple API calls
+    let isMounted = true;
+
+    async function getUrlFromBrowserTab() {
       try {
-        console.log("------- URL DETECTION FLOW START -------");
-        let activeUrl = "";
-        let sourceType = "";
-        let browserName = "";
+        // Directly try to use the Browser Extension API
+        // This will prompt the user to install the extension if they don't have it
+        const tabs = await BrowserExtension.getTabs();
+        const activeTab = tabs.find((tab) => tab.active);
 
-        // Check if Browser Extension is accessible
-        if (environment.canAccess(BrowserExtension)) {
-          console.log("Browser Extension accessible: Yes");
-
-          try {
-            console.log("Retrieving active browser tab...");
-            const tabs = await BrowserExtension.getTabs();
-            console.log(`Found ${tabs.length} tabs from Browser Extension`);
-
-            // Find the active tab
-            const activeTab = tabs.find((tab) => tab.active === true);
-
-            if (activeTab && activeTab.url && isValidURL(activeTab.url)) {
-              activeUrl = activeTab.url;
-              sourceType = "browser extension";
-
-              // Determine browser name from URL or use a generic name
-              browserName = "Browser"; // Default
-
-              // Try to detect the browser from the URL or browser details
-              if (activeTab.url) {
-                if (activeTab.url.includes("arc.net") || activeTab.url.includes("arc.browser")) {
-                  browserName = "Arc";
-                } else if (activeTab.url.includes("chrome-extension://")) {
-                  browserName = "Chrome";
-                } else if (activeTab.url.includes("safari-extension://")) {
-                  browserName = "Safari";
-                } else if (activeTab.url.includes("firefox-extension://")) {
-                  browserName = "Firefox";
-                } else if (activeTab.url.includes("edge-extension://")) {
-                  browserName = "Edge";
-                }
-              }
-
-              console.log("✅ Got URL from Browser Extension:", activeUrl);
-              console.log("Browser:", browserName);
-
-              // Show success toast if not in silent mode
-              if (!isFullySilent) {
-                await showToast({
-                  style: Toast.Style.Success,
-                  title: `Using ${browserName} URL`,
-                  message: "URL detected from active browser tab",
-                });
-              }
-            } else {
-              console.log("❌ No active tab found with valid URL");
-              // No active tab found, we'll fall back to clipboard if enabled
-            }
-          } catch (error) {
-            console.error("Error accessing browser tabs:", error);
-          }
-        } else {
-          console.log("❌ Browser Extension is not accessible");
-
-          // Show a toast about the missing browser extension if not in silent mode
-          if (!isFullySilent) {
-            await showToast({
-              style: Toast.Style.Failure,
-              title: "Browser Extension Required",
-              message: "Please install the Raycast Browser Extension",
-            });
-          }
+        if (activeTab && activeTab.url) {
+          setExtensionAccessible(true);
+          return activeTab.url;
         }
 
-        // If no URL from browser extension and clipboard fallback is enabled
-        if (!activeUrl && useClipboardFallback) {
+        // No active tab found with a URL
+        setExtensionAccessible(true);
+        throw new Error("No active browser tab found");
+      } catch (error) {
+        console.log("Error with browser extension:", error);
+        setExtensionAccessible(false);
+
+        // Extension not available or user declined installation
+        // Check clipboard if enabled
+        if (useClipboardFallback) {
           try {
-            console.log("Trying clipboard fallback...");
             const clipboardText = await Clipboard.readText();
-            console.log("Clipboard contains text:", clipboardText ? "Yes" : "No");
-
             if (clipboardText) {
-              // Try to extract a URL from clipboard text
-              const extractedUrl = extractURL(clipboardText);
+              const extractedUrl = extractURLFromText(clipboardText);
               if (extractedUrl) {
-                activeUrl = extractedUrl;
-                sourceType = "clipboard";
-                console.log("📋 Using URL from clipboard:", activeUrl);
-
-                // Show notification if not in silent mode
-                if (!isFullySilent) {
-                  await showToast({
-                    style: Toast.Style.Success,
-                    title: "Using Clipboard URL",
-                    message: "No active browser tab found",
-                  });
-                }
-              } else {
-                console.log("❌ No valid URL found in clipboard content");
+                return extractedUrl;
               }
-            } else {
-              console.log("❌ Clipboard is empty");
             }
-          } catch (error) {
-            console.error("Error reading clipboard:", error);
+          } catch (clipboardError) {
+            console.log("Error reading from clipboard:", clipboardError);
           }
         }
 
-        console.log("------- URL DETECTION SUMMARY -------");
-        console.log(`URL found: ${activeUrl ? "YES" : "NO"}`);
-        console.log(`Source: ${sourceType || "None"}`);
-        console.log(`Browser: ${browserName || "Unknown"}`);
-        console.log("------- URL DETECTION FLOW END -------");
-
-        // If no valid URL found
-        if (!activeUrl) {
-          const errorMessage =
-            "No valid URL found in active browser tab" + (useClipboardFallback ? " or clipboard" : "");
-
-          // Always show error toast
-          await showToast({
-            style: Toast.Style.Failure,
-            title: "No Valid URL Found",
-            message: errorMessage,
-          });
-
-          if (!isFullySilent) {
-            setMarkdown(
-              [
-                "# No Valid URL Found",
-                "",
-                errorMessage,
-                "",
-                "Please make sure:",
-                "- You have an active browser tab with a valid URL",
-                "- The Raycast Browser Extension is installed and has necessary permissions",
-                useClipboardFallback ? "- Or you have copied a valid URL to your clipboard" : "",
-              ]
-                .filter(Boolean)
-                .join("\n"),
-            );
-          }
-
-          // Close window in silent mode even on errors
-          if (isFullySilent) {
-            await closeMainWindow({ clearRootSearch: true });
-          }
-
-          setIsLoading(false);
-          return;
-        }
-
-        // We have a valid URL
-        setUrl(activeUrl);
-
-        if (!isFullySilent) {
-          setMarkdown(
-            "# Converting webpage to Markdown...\n\n> Loading content from: " +
-              activeUrl +
-              (sourceType === "clipboard" ? " (from clipboard)" : ` (from ${browserName || "browser"})`),
-          );
+        // No URL found from any source
+        if (error instanceof Error) {
+          throw error; // Rethrow the original error
         } else {
-          // For silent mode, show a "working on it" toast
+          throw new Error(
+            "Browser extension not accessible" + (useClipboardFallback ? " and no valid URL found in clipboard" : ""),
+          );
+        }
+      }
+    }
+
+    async function fetchMarkdown() {
+      try {
+        if (!isMounted) return;
+        setMarkdown("# Getting URL from browser tab...");
+
+        // Get URL from browser tab or clipboard
+        const detectedUrl = await getUrlFromBrowserTab();
+        if (!isMounted) return;
+        setUrl(detectedUrl);
+
+        setMarkdown("# Converting webpage to Markdown...\n\n> Loading content from: " + detectedUrl);
+
+        // Show toast in silent mode
+        if (silentMode) {
+          // Extract domain for a cleaner message
+          let domain = "";
+          try {
+            domain = new URL(detectedUrl).hostname.replace("www.", "");
+          } catch (e) {
+            domain = detectedUrl;
+          }
+
           await showToast({
             style: Toast.Style.Animated,
-            title: "Converting to Markdown",
-            message: `Processing ${sourceType === "clipboard" ? "clipboard URL" : "browser tab"}...`,
+            title: "Converting webpage",
+            message: `Converting ${domain} to markdown...`,
           });
         }
 
-        // Fetch and process the markdown
-        const response = await fetchJinaMarkdown(activeUrl, preferences);
+        // Fetch and process the markdown content
+        const response = await fetchJinaMarkdown(detectedUrl, preferences);
+        if (!isMounted) return;
+
         const { markdown: processedMarkdown, metadata: newMetadata } = processMarkdownContent(
           response.data.content,
           response.data.title,
           response.data.links,
-          preferences.includeLinksSummary,
+          includeLinksSummary,
         );
 
         setMetadata(newMetadata);
 
         let finalMarkdown = processedMarkdown;
-        if (preferences.prependFrontMatter) {
+        if (prependFrontMatter) {
           finalMarkdown = addFrontMatter(processedMarkdown, {
             title: response.data.title,
-            sourceUrl: activeUrl,
+            sourceUrl: detectedUrl,
             wordCount: newMetadata.wordCount || 0,
             readingTime: newMetadata.readingTime || "",
           });
         }
 
-        // Set the markdown state
         setMarkdown(finalMarkdown);
 
-        // If auto-copy is enabled, copy to clipboard
-        if (autoCopyToClipboard) {
-          await Clipboard.copy(finalMarkdown);
+        // Log for debugging
+        console.log(`Auto-copy enabled: ${autoCopyToClipboard}, Silent mode: ${silentMode}`);
 
-          // Show success notification
+        // Auto-copy to clipboard if enabled
+        if (autoCopyToClipboard) {
+          try {
+            await Clipboard.copy(finalMarkdown);
+            console.log("Content copied to clipboard");
+
+            // Always show a toast when auto-copying in silent mode
+            if (silentMode) {
+              await showToast({
+                style: Toast.Style.Success,
+                title: "Copied to Clipboard",
+                message: `${Math.round(finalMarkdown.length / 1024)}KB copied - conversion complete`,
+              });
+            }
+          } catch (clipError) {
+            console.error("Error copying to clipboard:", clipError);
+            if (silentMode) {
+              await showToast({
+                style: Toast.Style.Failure,
+                title: "Auto-copy failed",
+                message: "Could not copy to clipboard",
+              });
+            }
+          }
+        } else if (silentMode) {
+          // Show completion toast in silent mode when not auto-copying
           await showToast({
             style: Toast.Style.Success,
-            title: "Copied to Clipboard",
-            message: `${Math.ceil(finalMarkdown.length / 1000)}K characters | ${newMetadata.wordCount || 0} words`,
+            title: "Conversion successful",
+            message: `Ready: ${Math.round(finalMarkdown.length / 1024)}KB (open command to copy)`,
           });
-
-          // If silent mode is enabled, close the window
-          if (silentMode === true && isFullySilent === true) {
-            console.log("Closing window because silent mode is enabled");
-            await closeMainWindow({ clearRootSearch: true });
-          }
         }
       } catch (error) {
         console.error("Error converting URL:", error);
+        if (!isMounted) return;
+
+        setError(error instanceof Error ? error : new Error("An unknown error occurred"));
         const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
 
-        // Always show error toasts
-        await showToast({
-          style: Toast.Style.Failure,
-          title: "Conversion Failed",
-          message: errorMessage.substring(0, 50) + (errorMessage.length > 50 ? "..." : ""),
-        });
+        setMarkdown(
+          [
+            "# Unable to Convert Webpage",
+            "",
+            errorMessage,
+            "",
+            "Please make sure:",
+            extensionAccessible
+              ? "- A browser tab is active and accessible"
+              : "- You have the Raycast Browser Extension installed",
+            "- The webpage is publicly accessible",
+            "- The URL points to a valid webpage",
+            useClipboardFallback
+              ? "- You have a valid URL in your clipboard as a fallback"
+              : "- Consider enabling clipboard fallback in preferences",
+          ].join("\n"),
+        );
 
-        if (!isFullySilent) {
-          setMarkdown(
-            [
-              "# Unable to Convert Webpage",
-              "",
-              errorMessage,
-              "",
-              "Please make sure:",
-              "- You have an active browser tab open",
-              "- The webpage is publicly accessible",
-              "- The URL points to a valid webpage",
-            ].join("\n"),
-          );
-        } else {
-          // Close window in silent mode even on errors
-          if (silentMode === true) {
-            await closeMainWindow({ clearRootSearch: true });
+        if (silentMode) {
+          // Create a more specific error message based on the error type
+          let errorTitle = "Conversion failed";
+          let errorMsg = errorMessage;
+
+          if (errorMessage.includes("Browser extension")) {
+            errorTitle = "Browser extension error";
+            errorMsg = "Could not access browser tabs";
+          } else if (errorMessage.includes("no valid URL")) {
+            errorTitle = "No URL found";
+            errorMsg = "No URL in browser tab or clipboard";
+          } else if (errorMessage.includes("rate limit")) {
+            errorTitle = "API rate limit";
+            errorMsg = "Jina.ai API rate limited - try adding API key in preferences";
+          } else if (errorMessage.includes("active browser tab")) {
+            errorTitle = "No active tab";
+            errorMsg = "No active browser tab found with URL";
           }
+
+          await showToast({
+            style: Toast.Style.Failure,
+            title: errorTitle,
+            message: errorMsg,
+          });
         }
       } finally {
-        setIsLoading(false);
+        if (isMounted) {
+          setIsLoading(false);
+        }
       }
     }
 
-    // Start processing immediately
-    fetchBrowserTabAndConvert();
+    fetchMarkdown();
 
-    // If in silent mode, try to close window as soon as possible
-    if (silentMode === true && isFullySilent === true) {
-      console.log("Initial window close attempt because silent mode is enabled");
-      // Use a short timeout to give Raycast time to register the command
-      // but still minimize UI flash
-      setTimeout(() => {
-        closeMainWindow({ clearRootSearch: true }).catch(() => {
-          // Ignore errors from early close attempt
-        });
-      }, 100);
+    // Cleanup function to prevent state updates after unmounting
+    return () => {
+      isMounted = false;
+    };
+  }, [useClipboardFallback, autoCopyToClipboard, silentMode, isBackground]);
+
+  // Handle errors with toast
+  useEffect(() => {
+    if (error) {
+      showToast({
+        style: Toast.Style.Failure,
+        title: "Something went wrong",
+        message: error.message,
+      });
     }
-  }, [
-    preferences.prependFrontMatter,
-    preferences.includeLinksSummary,
-    useClipboardFallback,
-    autoCopyToClipboard,
-    silentMode,
-    shouldRunSilently,
-    isBackgroundLaunch,
-    isFullySilent,
-  ]);
+  }, [error]);
 
-  // In fully silent mode, return a completely empty UI
-  if (silentMode === true && isFullySilent === true) {
-    return (
-      <Detail
-        markdown=""
-        isLoading={false}
-        navigationTitle=""
-        actions={
-          <ActionPanel>
-            <ActionPanel.Section></ActionPanel.Section>
-          </ActionPanel>
-        }
-      />
-    );
-  }
-
-  // Regular UI
   return (
     <Detail
       markdown={markdown}
       isLoading={isLoading}
-      navigationTitle={metadata.title || "Converting..."}
-      metadata={preferences.includeMetadata ? <MetadataSection url={url} metadata={metadata} /> : undefined}
+      navigationTitle={metadata.title || (url ? "Converting..." : "No URL found")}
+      metadata={includeMetadata && url ? <MetadataSection url={url} metadata={metadata} /> : undefined}
       actions={
         <ActionPanel>
           <ActionPanel.Section>
             <Action.CopyToClipboard title="Copy Markdown" content={markdown} icon={Icon.Clipboard} />
             {url && <Action.OpenInBrowser title="Open Original URL" url={url} icon={Icon.Globe} />}
+            <Action title="Close Window" onAction={() => closeMainWindow()} icon={Icon.XmarkCircle} />
           </ActionPanel.Section>
         </ActionPanel>
       }

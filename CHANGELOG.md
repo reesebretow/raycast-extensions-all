@@ -1,19 +1,11 @@
 # Webpage to Markdown Changelog
 
-## [Enhanced Browser Tab Integration] - 2025-03-14
-
-### Added
-
-- Command to convert active browser tab to markdown
-- Requires the Raycast Browser Extension to detect active browser tabs
-- Command-specific preferences in the preferences UI for the Browser Tab command
-- Clipboard fallback feature when no active browser tab is detected
-- Auto-copy preference to automatically copy results to clipboard
-- Silent mode for headless operation with notifications for success or error
-
-### Changed
-
-- Improved high-quality conversion without needing to copy/paste URLs
+## [New Command: Browser Tab to Markdown] - {PR_MERGE_DATE}
+- Integrates with Raycast Browser Extension to fetch URL from active tab and convert to markdown using Jina.ai
+- Optional prefernces for Browser Tab to Markdown command: 
+- clipboard fallback if no browser tab is found or Raycast Browser Extension is not installed
+- silent mode for headless operation
+- auto-copy to clipboard
 
 ## [✨ AI Enhancements] - 2025-02-21
 
